@@ -25,7 +25,7 @@ tesseract engine)
 Copyright: fritz-hh  from Github (https://github.com/fritz-hh)
 Version: $VERSION
 
-Usage: OCRmyPDF.sh  [-h] [-v] [-g] [-k] [-d] [-c] [-i] [-o dpi] [-f|-s] [-l lan1[+lan2...]] [-C filename] inputfile outputfile
+Usage: OCRmyPDF.sh  [-h] [-v] [-g] [-k] [-d] [-c] [-i] [-n] [-o dpi] [-f] [-l language] [-C filename] inputfile outputfile
 
 -h : Display this help message
 -v : Increase the verbosity (this option can be used more than once) (e.g. -vvv)
@@ -37,21 +37,20 @@ Usage: OCRmyPDF.sh  [-h] [-v] [-g] [-k] [-d] [-c] [-i] [-o dpi] [-f|-s] [-l lan1
      - Do not delete the temporary files
 -d : Deskew each page before performing OCR
 -c : Clean each page before performing OCR
--i : Incorporate the cleaned image in the final PDF file (by default the original image, or the deskewed image if the -d option is set)
+-i : Incorporate the cleaned image in the final PDF file (by default the original image	
+     image, or the deskewed image if the -d option is set)
 -o : If the resolution of an image is lower than dpi value provided as argument, provide the OCR engine with 
      an oversampled image having the latter dpi value. This can improve the OCR results but can lead to a larger output PDF file.
      (default: no oversampling performed)
--f : Force to OCR the whole document, even if some page already contain font data.  
-     (which should not be the case for PDF files built from scnanned images) 
-     Any text data will be rendered to raster format and then fed through OCR.
--s : If pages contain font data, do not OCR that page, but include the page (as is) in the final output.
--l : Language(s) of the PDF file. The language should be set correctly in order to get good OCR results.
+-f : Force to OCR the whole document, even if some page already contain font data 
+     (which should not be the case for PDF files built from scanned images) 
+-l : Set the language of the PDF file in order to improve OCR results (default "eng")
      Any language supported by tesseract is supported (Tesseract uses 3-character ISO 639-2 language codes)
      Multiple languages may be specified, separated by '+' characters.
-     (The default language is defined in the config file)
 -C : Pass an additional configuration file to the tesseract OCR engine.
      (this option can be used more than once)
      Note 1: The configuration file must be available in the "tessdata/configs" folder of your tesseract installation
+-n : No OCR treatment, only clean and deskey
 inputfile  : PDF file to be OCRed
 outputfile : The PDF/A file that will be generated 
 --------------------------------------------------------------------------------------
@@ -79,7 +78,7 @@ absolutePath() {
 
 # Initialization the configuration parameters with default values
 VERBOSITY="$LOG_ERR"		# default verbosity level
-LAN="$DEFAULT_LANGUAGES"	# default language(s) of the PDF file (required to get good OCR results)
+LAN="eng"			# default language of the PDF file (required to get good OCR results)
 KEEP_TMP="0"			# 0=no, 1=yes (keep the temporary files)
 PREPROCESS_DESKEW="0"		# 0=no, 1=yes (deskew image)
 PREPROCESS_CLEAN="0"		# 0=no, 1=yes (clean image to improve OCR)
@@ -87,11 +86,10 @@ PREPROCESS_CLEANTOPDF="0"	# 0=no, 1=yes (put cleaned image in final PDF)
 OVERSAMPLING_DPI="0"		# 0=do not perform oversampling (dpi value under which oversampling should be performed)
 PDF_NOIMG="0"			# 0=no, 1=yes (generates each PDF page twice, with and without image)
 FORCE_OCR="0"			# 0=do not force, 1=force (force to OCR the whole document, even if some page already contain font data)
-SKIP_TEXT="0"			# 0=do not skip text pages, 1=skip text pages
 TESS_CFG_FILES=""		# list of additional configuration files to be used by tesseract
 
 # Parse optional command line arguments
-while getopts ":hvgkdcio:fsl:C:" opt; do
+while getopts ":hvgkdncio:fl:C:" opt; do
 	case $opt in
 		h) usage ; exit 0 ;;
 		v) VERBOSITY=$(($VERBOSITY+1)) ;;
@@ -102,9 +100,9 @@ while getopts ":hvgkdcio:fsl:C:" opt; do
 		i) PREPROCESS_CLEANTOPDF="1" ;;
 		o) OVERSAMPLING_DPI="$OPTARG" ;;
 		f) FORCE_OCR="1" ;;
-		s) SKIP_TEXT="1" ;;
 		l) LAN="$OPTARG" ;;
 		C) TESS_CFG_FILES="$OPTARG $TESS_CFG_FILES" ;;
+		n) NO_OCR="1";;
 		\?)
 			echo "Invalid option: -$OPTARG"
 			usage
@@ -126,21 +124,12 @@ if [ "$#" -ne "2" ]; then
 	exit $EXIT_BAD_ARGS
 fi
 
-# Ensure that -f and -s are not both set
-if [ "$SKIP_TEXT" -eq "1" -a "$FORCE_OCR" -eq "1" ]; then
-	echo "Options -f and -s are mutually exclusive; choose one or the other"
-	usage
-	exit $EXIT_BAD_ARGS
-fi
-
-
-[ ! -f "$1" ] && echo "The input file does not exist. Exiting..." && exit $EXIT_BAD_ARGS
+[ ! -f "$1" ] \
+	&& echo "The input file does not exist. Exiting..." && exit $EXIT_BAD_ARGS
 FILE_INPUT_PDF="`absolutePath "$1"`"
 
-! absolutePath "$2" >/dev/null \
+! absolutePath "$2" > /dev/null \
 	&& echo "The folder in which the output file should be generated does not exist. Exiting..." && exit $EXIT_BAD_ARGS
-[ -d "$2" ] && echo "Please enter the path of the file to be generated (and not a path to a folder). Exitíng..." && exit $EXIT_BAD_ARGS
-[ -f "$2" ] && echo "The output file already exists. Exiting..." && exit $EXIT_BAD_ARGS
 FILE_OUTPUT_PDFA="`absolutePath "$2"`"
 
 
@@ -158,7 +147,6 @@ cd "$BASEPATH"
 ! command -v pdfimages > /dev/null && echo "Please install poppler-utils. Exiting..." && exit $EXIT_MISSING_DEPENDENCY
 ! command -v pdftoppm > /dev/null && echo "Please install poppler-utils. Exiting..." && exit $EXIT_MISSING_DEPENDENCY
 ! command -v pdffonts > /dev/null && echo "Please install poppler-utils. Exiting..." && exit $EXIT_MISSING_DEPENDENCY
-! command -v pdfseparate > /dev/null && echo "Please install or update poppler-utils to at least 0.24.5. Exiting..." && exit $EXIT_MISSING_DEPENDENCY
 [ $PREPROCESS_CLEAN -eq 1 ] && ! command -v unpaper > /dev/null && echo "Please install unpaper. Exiting..." && exit $EXIT_MISSING_DEPENDENCY
 ! command -v tesseract > /dev/null && echo "Please install tesseract and tesseract-data. Exiting..." && exit $EXIT_MISSING_DEPENDENCY
 ! python2 -c 'import lxml' 2>/dev/null && echo "Please install the python library lxml. Exiting..." && exit $EXIT_MISSING_DEPENDENCY
@@ -177,7 +165,7 @@ reqtessversion="3.02.01"
 tessversion=`tesseract -v 2>&1 | grep "tesseract" | sed s/[^0-9.]//g`
 tesstooold=$(echo "`echo $tessversion | sed s/[.]//2`-`echo $reqtessversion | sed s/[.]//2` < 0" | bc)
 [ "$tesstooold" -eq "1" ] \
-	&& echo "Please install tesseract ${reqtessversion} or newer (currently installed version is ${tessversion})" && exit $EXIT_MISSING_DEPENDENCY
+	&& echo "Please install tesseract ${reqtessversion} or newer (currently installed version is ${tessversion})" 
 
 # ensure the right GNU parallel version is installed
 # older version do not support -q flag (required to escape special characters)
@@ -204,7 +192,6 @@ if [ $VERBOSITY -ge $LOG_DEBUG ]; then
 	pdfimages -v
 	pdftoppm -v
 	pdffonts -v
-	pdfseparate -v
 	echo "--------------------------------"
 	echo "unpaper version:"
 	unpaper --version
@@ -225,13 +212,13 @@ fi
 
 
 
-# check if the language(s) passed to tesseract are all supported
+# check if the languages passed to tesseract are all supported
 for currentlan in `echo "$LAN" | sed 's/+/ /g'`; do
 	if ! tesseract --list-langs 2>&1 | grep "^$currentlan\$" > /dev/null; then
 		echo "The language \"$currentlan\" is not supported by tesseract."
 		tesseract --list-langs 2>&1 | tr '\n' ' '; echo
 		echo "Exiting..."
-		exit $EXIT_BAD_ARGS
+		#exit $EXIT_BAD_ARGS
 	fi
 done
 
@@ -273,7 +260,7 @@ numpages=`tail -n 1 "$FILE_PAGES_INFO" | cut -f1 -d" "`
 # process each page of the input pdf file
 parallel --gnu -q -k --halt-on-error 1 "$OCR_PAGE" "$FILE_INPUT_PDF" "{}" "$numpages" "$TMP_FLD" \
 	"$VERBOSITY" "$LAN" "$KEEP_TMP" "$PREPROCESS_DESKEW" "$PREPROCESS_CLEAN" "$PREPROCESS_CLEANTOPDF" "$OVERSAMPLING_DPI" \
-	"$PDF_NOIMG" "$FORCE_OCR" "$SKIP_TEXT" "$TESS_CFG_FILES" < "$FILE_PAGES_INFO"
+	"$PDF_NOIMG" "$TESS_CFG_FILES" "$FORCE_OCR" < "$FILE_PAGES_INFO"
 ret_code="$?"
 [ $ret_code -ne 0 ] && exit $ret_code 
 
